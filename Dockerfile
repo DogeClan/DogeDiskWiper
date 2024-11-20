@@ -1,111 +1,70 @@
-# Dockerfile
 FROM debian:latest
 
-# Install Python, Pip, venv, and necessary utilities
+# Install necessary tools and Python
 RUN apt-get update && apt-get install -y \
+    wipe \
     python3 \
     python3-pip \
-    python3-venv \
-    secure-delete \
-    unzip \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean
 
-# Create app directory
+# Install Flask
+RUN pip3 install flask
+
+# Set working directory
 WORKDIR /app
 
-# Write the HTML upload form directly into Dockerfile
-RUN mkdir -p /app/templates && \
-    echo '<!doctype html>' > /app/templates/upload.html && \
-    echo '<html>' >> /app/templates/upload.html && \
-    echo '<head>' >> /app/templates/upload.html && \
-    echo '    <meta charset="UTF-8">' >> /app/templates/upload.html && \
-    echo '    <title>Upload Directory</title>' >> /app/templates/upload.html && \
-    echo '    <style>' >> /app/templates/upload.html && \
-    echo '        body {' >> /app/templates/upload.html && \
-    echo '            background-color: black;' >> /app/templates/upload.html && \
-    echo '            color: armygreen;' >> /app/templates/upload.html && \
-    echo '            font-family: "Courier New", Courier, monospace;' >> /app/templates/upload.html && \
-    echo '            text-align: center;' >> /app/templates/upload.html && \
-    echo '        }' >> /app/templates/upload.html && \
-    echo '        h1 {' >> /app/templates/upload.html && \
-    echo '            margin-top: 50px;' >> /app/templates/upload.html && \
-    echo '        }' >> /app/templates/upload.html && \
-    echo '        form {' >> /app/templates/upload.html && \
-    echo '            margin: 20px auto;' >> /app/templates/upload.html && \
-    echo '            padding: 20px;' >> /app/templates/upload.html && \
-    echo '            border: 2px solid armygreen;' >> /app/templates/upload.html && \
-    echo '            border-radius: 10px;' >> /app/templates/upload.html && \
-    echo '            display: inline-block;' >> /app/templates/upload.html && \
-    echo '        }' >> /app/templates/upload.html && \
-    echo '        input[type="file"], input[type="submit"] {' >> /app/templates/upload.html && \
-    echo '            background-color: armygreen;' >> /app/templates/upload.html && \
-    echo '            color: black;' >> /app/templates/upload.html && \
-    echo '            border: none;' >> /app/templates/upload.html && \
-    echo '            padding: 10px 20px;' >> /app/templates/upload.html && \
-    echo '            border-radius: 5px;' >> /app/templates/upload.html && \
-    echo '            font-size: 16px;' >> /app/templates/upload.html && \
-    echo '            cursor: pointer;' >> /app/templates/upload.html && \
-    echo '        }' >> /app/templates/upload.html && \
-    echo '        input[type="file"]:hover, input[type="submit"]:hover {' >> /app/templates/upload.html && \
-    echo '            background-color: darkgreen;' >> /app/templates/upload.html && \
-    echo '        }' >> /app/templates/upload.html && \
-    echo '    </style>' >> /app/templates/upload.html && \
-    echo '</head>' >> /app/templates/upload.html && \
-    echo '<body>' >> /app/templates/upload.html && \
-    echo '    <h1>Upload Directory to Wipe</h1>' >> /app/templates/upload.html && \
-    echo '    <form method="post" enctype="multipart/form-data">' >> /app/templates/upload.html && \
-    echo '        <input type="file" name="directory" accept=".zip"><br><br>' >> /app/templates/upload.html && \
-    echo '        <input type="submit" value="Upload">' >> /app/templates/upload.html && \
-    echo '    </form>' >> /app/templates/upload.html && \
-    echo '</body>' >> /app/templates/upload.html && \
-    echo '</html>' >> /app/templates/upload.html
+# Add Flask application code
+RUN echo "\
+from flask import Flask, request, render_template\n\
+import subprocess\n\
+\n\
+app = Flask(__name__)\n\
+\n\
+@app.route('/')\n\
+def home():\n\
+    return render_template('index.html')\n\
+\n\
+@app.route('/wipe', methods=['POST'])\n\
+def wipe():\n\
+    target_path = request.form.get('target_path')\n\
+    \n\
+    # Validate input\n\
+    if not target_path:\n\
+        return 'Error: No path specified.', 400\n\
+    \n\
+    try:\n\
+        # Perform wipe securely using the 'wipe' tool\n\
+        subprocess.run(['wipe', '-r', target_path], check=True)\n\
+        return f'Successfully wiped: {target_path}'\n\
+    except subprocess.CalledProcessError:\n\
+        return f'Error: Failed to wipe {target_path}. Check permissions or path validity.', 500\n\
+    except Exception as e:\n\
+        return f'Error during wipe: {str(e)}', 500\n\
+\n\
+if __name__ == '__main__':\n\
+    app.run(host='0.0.0.0', port=5000)\n" > app.py
 
-# Create a virtual environment
-RUN python3 -m venv /app/venv
+# Add HTML template code
+RUN mkdir templates && echo "\
+<!DOCTYPE html>\n\
+<html lang=\"en\">\n\
+<head>\n\
+    <meta charset=\"UTF-8\">\n\
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n\
+    <title>Secure File/Directory Wiper</title>\n\
+</head>\n\
+<body>\n\
+    <h1>Secure File/Directory Wiper</h1>\n\
+    <form action=\"/wipe\" method=\"POST\">\n\
+        <label for=\"target_path\">Path to Wipe:</label>\n\
+        <input type=\"text\" id=\"target_path\" name=\"target_path\" placeholder=\"e.g., /dev/sda or /path/to/directory\" required>\n\
+        <button type=\"submit\">Wipe</button>\n\
+    </form>\n\
+</body>\n\
+</html>\n" > templates/index.html
 
-# Activate the virtual environment and install Flask
-RUN . /app/venv/bin/activate && pip install --no-cache-dir Flask
-
-# Write the Flask application directly into the Dockerfile
-RUN echo 'from flask import Flask, request, render_template' > /app/app.py && \
-    echo 'import os' >> /app/app.py && \
-    echo 'import shutil' >> /app/app.py && \
-    echo 'import subprocess' >> /app/app.py && \
-    echo '' >> /app/app.py && \
-    echo 'app = Flask(__name__)' >> /app/app.py && \
-    echo '' >> /app/app.py && \
-    echo '# Ensure the upload directory exists' >> /app/app.py && \
-    echo 'UPLOAD_FOLDER = "/app/uploads"' >> /app/app.py && \
-    echo 'os.makedirs(UPLOAD_FOLDER, exist_ok=True)' >> /app/app.py && \
-    echo '' >> /app/app.py && \
-    echo '@app.route("/")' >> /app/app.py && \
-    echo 'def upload_form():' >> /app/app.py && \
-    echo '    return render_template("upload.html")' >> /app/app.py && \
-    echo '' >> /app/app.py && \
-    echo '@app.route("/", methods=["POST"])' >> /app/app.py && \
-    echo 'def upload_file():' >> /app/app.py && \
-    echo '    if "directory" not in request.files:' >> /app/app.py && \
-    echo '        return "No directory part"' >> /app/app.py && \
-    echo '    directory = request.files["directory"]' >> /app/app.py && \
-    echo '    if directory.filename == "":' >> /app/app.py && \
-    echo '        return "No selected file"' >> /app/app.py && \
-    echo '    temp_file_path = os.path.join(UPLOAD_FOLDER, directory.filename)' >> /app/app.py && \
-    echo '    directory.save(temp_file_path)' >> /app/app.py && \
-    echo '' >> /app/app.py && \
-    echo '    extract_path = os.path.join(UPLOAD_FOLDER, "tempdir")' >> /app/app.py && \
-    echo '    os.makedirs(extract_path, exist_ok=True)' >> /app/app.py && \
-    echo '    subprocess.run(["unzip", temp_file_path, "-d", extract_path], check=True)' >> /app/app.py && \
-    echo '    subprocess.run(["sfill", "-f", "-l", "-n", "--", extract_path], check=True)' >> /app/app.py && \
-    echo '    os.remove(temp_file_path)' >> /app/app.py && \
-    echo '    shutil.rmtree(extract_path)' >> /app/app.py && \
-    echo '    return "Directory has been wiped successfully!"' >> /app/app.py && \
-    echo '' >> /app/app.py && \
-    echo 'if __name__ == "__main__":' >> /app/app.py && \
-    echo '    app.run(host="0.0.0.0", port=5000)' >> /app/app.py
-
-# Expose port 5000
+# Expose Flask port
 EXPOSE 5000
 
-# Define the command to run the application using the virtual environment
-CMD ["/app/venv/bin/python", "app.py"]
+# Run the Flask app
+CMD ["python3", "app.py"]
