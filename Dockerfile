@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
 # Ensure the upload directory exists
 RUN mkdir -p /tmp/uploads
 
-# Now, apply permissions to the upload folder
+# Apply permissions to the upload folder
 RUN chmod -R 777 /tmp/uploads
 
 # Create a virtual environment for Python packages
@@ -22,15 +22,14 @@ RUN python3 -m venv /venv
 # Install Flask and requests in the virtual environment
 RUN /venv/bin/pip install flask requests
 
-# Create and write the Flask application
+# Create and write the updated Flask application
 RUN echo "\
-from flask import Flask, request, render_template\n\
-import subprocess\n\
+from flask import Flask, request, render_template, redirect, url_for, flash\n\
 import os\n\
 import shutil\n\
-import requests\n\
 \n\
 app = Flask(__name__)\n\
+app.secret_key = 'supersecretkey'  # Required for session management\n\
 \n\
 # Define upload folder\n\
 UPLOAD_FOLDER = '/tmp/uploads'\n\
@@ -45,7 +44,7 @@ def upload_file():\n\
     uploaded_files = request.files.getlist('directory_picker')  # Get uploaded files from the form\n\
     if not uploaded_files:\n\
         return 'Error: No files uploaded.', 400\n\
-    \n\
+\n\
     # Save files to the upload folder\n\
     for file in uploaded_files:\n\
         file_path = os.path.join(UPLOAD_FOLDER, file.filename)\n\
@@ -54,47 +53,30 @@ def upload_file():\n\
         os.makedirs(file_dir, exist_ok=True)\n\
         file.save(file_path)\n\
     \n\
-    # After saving, upload to the remote server\n\
-    upload_to_server(UPLOAD_FOLDER)\n\
-    \n\
-    # Now wipe the uploaded files and local copy\n\
-    wipe(UPLOAD_FOLDER)\n\
-    return 'Files uploaded and wiped successfully!', 200\n\
+    # After saving, show confirmation page for deletion\n\
+    return render_template('confirm_delete.html', files=uploaded_files)\n\
 \n\
-def upload_to_server(upload_folder):\n\
-    # Define the server URL for uploading files\n\
-    server_url = 'https://your-server.com/upload'  # Replace with the actual URL of the server\n\
-    for filename in os.listdir(upload_folder):\n\
-        file_path = os.path.join(upload_folder, filename)\n\
-        # Skip directories and process only files\n\
-        if os.path.isdir(file_path):\n\
-            continue\n\
-        with open(file_path, 'rb') as f:\n\
-            response = requests.post(server_url, files={'file': f})\n\
-            if response.status_code != 200:\n\
-                print(f'Failed to upload {filename} to server. Status code: {response.status_code}')\n\
-\n\
-def wipe(directory):\n\
-    # Perform wipe securely using the 'wipe' tool\n\
-    try:\n\
-        subprocess.run(['sudo', 'wipe', '-r', '-f', directory], check=True)\n\
-        print(f'Successfully wiped: {directory}')\n\
-    except subprocess.CalledProcessError:\n\
-        print(f'Error: Failed to wipe {directory}. Check permissions or path validity.')\n\
-    except Exception as e:\n\
-        print(f'Error during wipe: {str(e)}')\n\
+@app.route('/delete', methods=['POST'])\n\
+def delete_files():\n\
+    directory_to_delete = UPLOAD_FOLDER\n\
+    if os.path.exists(directory_to_delete):\n\
+        shutil.rmtree(directory_to_delete)  # Deletes the directory and its contents\n\
+        flash('The uploaded directory has been deleted.', 'success')\n\
+    else:\n\
+        flash('Directory does not exist.', 'error')\n\
+    return redirect(url_for('home'))\n\
 \n\
 if __name__ == '__main__':\n\
     app.run(host='0.0.0.0', port=5000)\n" > app.py
 
-# Create and write the hacker-themed HTML template with a directory picker
+# Create and write the HTML template for file upload
 RUN mkdir -p templates && echo "\
 <!DOCTYPE html>\n\
 <html lang=\"en\">\n\
 <head>\n\
     <meta charset=\"UTF-8\">\n\
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n\
-    <title>Secure File/Directory Uploader & Wiper</title>\n\
+    <title>Secure File Uploader</title>\n\
     <style>\n\
         body {\n\
             background-color: #1a1a1a;\n\
@@ -149,17 +131,50 @@ RUN mkdir -p templates && echo "\
     </style>\n\
 </head>\n\
 <body>\n\
-    <h1>Secure File/Directory Uploader & Wiper</h1>\n\
+    <h1>Secure File Uploader</h1>\n\
     <form action=\"/upload\" method=\"POST\" enctype=\"multipart/form-data\">\n\
-        <label for=\"directory_picker\">Select Directory to Upload & Wipe:</label>\n\
+        <label for=\"directory_picker\">Select Directory to Upload:</label>\n\
         <input type=\"file\" id=\"directory_picker\" name=\"directory_picker\" webkitdirectory directory multiple required>\n\
-        <button type=\"submit\">Upload & Wipe</button>\n\
+        <button type=\"submit\">Upload</button>\n\
     </form>\n\
+    {% with messages = get_flashed_messages(with_categories=true) %}\n\
+      {% if messages %}\n\
+        <ul>\n\
+        {% for category, message in messages %}\n\
+          <li class=\"{{ category }}\">{{ message }}</li>\n\
+        {% endfor %}\n\
+        </ul>\n\
+      {% endif %}\n\
+    {% endwith %}\n\
     <footer>\n\
-        <p>Warning: Use with caution. Wiping data is irreversible!</p>\n\
+        <p>Warning: Use with caution!</p>\n\
     </footer>\n\
 </body>\n\
 </html>\n" > templates/index.html
+
+# Create and write the HTML template for deletion confirmation
+RUN echo "\
+<!DOCTYPE html>\n\
+<html lang=\"en\">\n\
+<head>\n\
+    <meta charset=\"UTF-8\">\n\
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n\
+    <title>Confirm Deletion</title>\n\
+</head>\n\
+<body>\n\
+    <h1>Confirm Deletion</h1>\n\
+    <p>The following files have been uploaded:</p>\n\
+    <ul>\n\
+        {% for file in files %}\n\
+            <li>{{ file.filename }}</li>\n\
+        {% endfor %}\n\
+    </ul>\n\
+    <form action=\"/delete\" method=\"POST\">\n\
+        <button type=\"submit\">Delete Uploaded Files</button>\n\
+    </form>\n\
+    <a href=\"/\">Cancel</a>\n\
+</body>\n\
+</html>\n" > templates/confirm_delete.html
 
 # Expose the port and run the Flask app
 EXPOSE 5000
